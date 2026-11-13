@@ -7,8 +7,8 @@
 <meta name="theme-color" content="#FBF8F4">
 <meta name="description" content="Daily, weekly and monthly planner with productivity and finance tools.">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -1038,7 +1038,7 @@ function dueReminders(){
 function notifyNow(title,body){
   try{
     if(navigator.serviceWorker&&navigator.serviceWorker.getRegistration){
-      navigator.serviceWorker.getRegistration().then(r=>{if(r&&r.showNotification)r.showNotification(title,{body,icon:'icons/icon-192.png',badge:'icons/icon-192.png',tag:title});else new Notification(title,{body})}).catch(()=>{try{new Notification(title,{body})}catch(e){}});
+      navigator.serviceWorker.getRegistration().then(r=>{if(r&&r.showNotification)r.showNotification(title,{body,icon:'icon-192.png',badge:'icon-192.png',tag:title});else new Notification(title,{body})}).catch(()=>{try{new Notification(title,{body})}catch(e){}});
     }else new Notification(title,{body});
   }catch(e){}
 }
