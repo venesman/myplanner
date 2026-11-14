@@ -585,7 +585,7 @@ function vMoney(){
   const unpaid=S.bills.filter(x=>!x.paid?.[ym]);
   const subsM=S.subs.reduce((a,s)=>a+(s.cycle==='yearly'?num(s.amount)/12:num(s.amount)),0);
   const tiles=[['expenses','card','pink','Expenses',`${list.length} entries`],['budget','pie','peach','Budget',planned?money(planned):'Not set'],['bills','bill','yellow','Bills',`${unpaid.length} unpaid`],['savings','heart','mint','Savings',`${S.savings.length} goal${S.savings.length===1?'':'s'}`],['subscriptions','repeat','blue','Subscriptions',`${money(subsM)}/mo`],['debt','down','lav','Debt payoff',`${S.debts.length} tracked`]];
-  return `${monthNav()}
+  return `${exportBanner()}${monthNav()}
   <div class="paper">${band('mint','Overview')}
     <div class="sub" style="font-size:11px">Balance this month</div><div class="big ${inc-out<0?'money-out':''}">${money(inc-out)}</div>
     <div class="kpis" style="margin-top:10px"><div class="kpi"><small>Income</small><b class="money-in">${money(inc)}</b></div><div class="kpi"><small>Spent</small><b class="money-out">${money(out)}</b></div><div class="kpi"><small>Budget left</small><b>${planned?money(planned-out):'—'}</b></div></div>
@@ -619,6 +619,7 @@ function vBudget(){
     <div class="kpis" style="margin-top:12px"><div class="kpi"><small>Planned</small><b>${money(planned)}</b></div><div class="kpi"><small>Spent</small><b class="money-out">${money(out)}</b></div><div class="kpi"><small>Unassigned</small><b class="${income-planned<0?'money-out':''}">${money(income-planned)}</b></div></div>
     ${!planned&&S.budgets[addM(ym,-1)]?`<button class="btn sm soft" style="margin-top:12px" data-a="copyBudget">Copy last month’s budget</button>`:''}
   </div>
+  ${exportCard(ym)}
   <div class="paper">${band('yellow','Categories',`<button class="linkbtn" data-a="manageCats">Edit list</button>`)}
     ${S.cats.out.map(c=>{const pl=num(b.plan?.[c]),sp=byCat[c]||0;return `<div class="budrow"><div class="row between"><span class="grow">${esc(c)}</span><input inputmode="decimal" placeholder="0" data-b="budgets|${ym}|plan|${esc(c)}" data-n="1" data-rr="1" value="${b.plan?.[c]||''}"></div>
       <div class="bar ${pl&&sp>pl?'over':''}"><i style="width:${pl?pct(sp,pl):0}%"></i></div><div class="row between small muted" style="margin-top:3px"><span>Spent ${money(sp)}</span><span>${pl?(sp>pl?'Over by '+money(sp-pl):money(pl-sp)+' left'):''}</span></div></div>`}).join('')}
@@ -1056,6 +1057,7 @@ function checkReminders(){
     const key='b'+r.b.id+r.due;if(sent[key])return;
     notifyNow('💸 '+r.b.name+' due '+(r.diff===0?'today':r.diff===1?'tomorrow':'on '+fmtD(r.due)),money(num(r.b.amount)));sent[key]=1;changed=true;
   })}
+  const xd=exportDue();if(xd&&now.getHours()>=9&&!sent['x'+xd]){const n=MON[+xd.slice(5)-1];notifyNow('📊 Export '+n+'’s budget','Your '+n+' budget sheet is ready — open Money to export it.');sent['x'+xd]=1;changed=true}
   if(changed){const keep={};Object.keys(sent).slice(-300).forEach(k=>keep[k]=1);try{localStorage.setItem(LS+'-sent',JSON.stringify(keep))}catch(e){}}
 }
 setInterval(checkReminders,30000);setTimeout(checkReminders,3000);
@@ -1396,6 +1398,242 @@ function vLife(){
   <div class="tiles">${tiles.map(([v,i,c,l,s])=>`<button class="tile" data-a="go" data-v="${v}"><span class="ic ${c}">${ic(i)}</span><b>${l}</b><span>${s}</span></button>`).join('')}</div>
   ${waterCard(t)}`;
 }
+
+/* ---------- Excel export (budget) ---------- */
+const XL={
+  esc:s=>String(s??'').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])),
+  col:i=>{let s='',n=i+1;while(n){const m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=Math.floor((n-1)/26)}return s},
+  serial:d=>{const [y,m,dd]=d.split('-').map(Number);return (Date.UTC(y,m-1,dd)-Date.UTC(1899,11,30))/864e5},
+  q:n=>`'${n.replace(/'/g,"''")}'`
+};
+const xT=(v,s=0)=>({t:'s',v:String(v??''),s});
+const xN=(v,s=2)=>({t:'n',v:num(v),s});
+const xD=d=>d?{t:'n',v:XL.serial(d),s:3}:xT('');
+const xF=(f,cache,s=2)=>({t:'f',f,cache,s});
+function xSheet(wb,name,widths){const sh={name:name.replace(/[\[\]:*?\/\\]/g,'').slice(0,31),widths,rows:[],cf:[]};wb.push(sh);return sh}
+const xRow=(sh,cells=[])=>{sh.rows.push(cells);return sh.rows.length};
+const xNext=sh=>sh.rows.length+1;
+const xRef=(sh,c,r)=>`${XL.q(sh.name)}!$${c}$${r}`;
+const xRng=(sh,c,a,b)=>`${XL.q(sh.name)}!$${c}$${a}:$${c}$${b}`;
+const xHead=(sh,title)=>{if(sh.rows.length){xRow(sh);xRow(sh)}xRow(sh,[xT(title,6)])};
+const xCols=(sh,labels)=>xRow(sh,labels.map(l=>xT(l,1)));
+const monLabel=ym=>MON[+ym.slice(5)-1]+' '+ym.slice(0,4);
+const sumLog=(log,from,to)=>(log||[]).filter(l=>(!from||(l.date&&l.date>=from))&&(!to||!l.date||l.date<=to)).reduce((a,l)=>a+num(l.amt),0);
+
+/* writes one month; stacked = all sections on one tab (year file) */
+function xlMonth(wb,ym,stacked){
+  const W={sum:[28,18],bud:[24,16,16,16,12],tx:[14,12,20,30,16],bill:[24,16,16,12,28],save:[24,18,18,18,16,12,16]};
+  const one=stacked?xSheet(wb,MON[+ym.slice(5)-1].slice(0,3),[26,18,18,18,18,14,16]):null;
+  const tab=(name,w)=>one||xSheet(wb,name,w);
+  const R={},V={};
+  const b=budgetOf(ym), end=ym+'-'+pad(daysIn(ym)), start=ym+'-01';
+  const list=txIn(ym).slice().sort((a,c)=>a.date.localeCompare(c.date)||(a.created||0)-(c.created||0));
+  const spent=sumOut(list), inc=sumIn(list);
+  const byCat={};list.filter(t=>t.type!=='in').forEach(t=>{const c=t.cat||'Others';byCat[c]=(byCat[c]||0)+num(t.amount)});
+  const cats=[...S.cats.out];[...Object.keys(b.plan||{}),...Object.keys(byCat)].forEach(c=>{if(!cats.includes(c)&&(num(b.plan?.[c])||byCat[c]))cats.push(c)});
+  const planned=cats.reduce((a,c)=>a+num(b.plan?.[c]),0);
+  const bills=S.bills.slice().sort((a,c)=>(+a.day)-(+c.day));
+  const billTot=bills.reduce((a,x)=>a+num(x.amount),0), billPaid=bills.filter(x=>x.paid?.[ym]).reduce((a,x)=>a+num(x.amount),0);
+  const savedM=S.savings.reduce((a,s)=>a+sumLog(s.log,start,end),0), debtM=S.debts.reduce((a,d)=>a+sumLog(d.log,start,end),0);
+  Object.assign(V,{exp:num(b.income),inc,plan:planned,spent,left:planned-spent,bal:inc-spent,saved:savedM,debt:debtM});
+
+  /* 1. Summary */
+  const s1=tab('Summary',W.sum);
+  xRow(s1,[xT(stacked?monLabel(ym):'Budget summary — '+monLabel(ym),6)]);
+  if(stacked)xRow(s1,[xT('Summary',9)]);
+  xCols(s1,['Item','Amount']);
+  const line=(label,cell,key)=>{const r=xRow(s1,[xT(label),cell]);if(key)R['s_'+key]=xRef(s1,'B',r);return r};
+  line('Expected income',xN(b.income),'exp');
+  line('Actual income',xF(()=>R.inc,inc),'inc');
+  line('Planned budget',xF(()=>R.plan,planned),'plan');
+  line('Total spent',xF(()=>R.spent,spent),'spent');
+  const rl=line('Budget left',xF(()=>`${R.plan}-${R.spent}`,planned-spent),'left');
+  const rb=line('Balance (income − spent)',xF(()=>`${R.inc}-${R.spent}`,inc-spent),'bal');
+  line('Bills paid',xF(()=>R.billsPaid,billPaid));
+  line('Bills still to pay',xF(()=>R.billsLeft,billTot-billPaid));
+  line('Saved this month',xF(()=>R.saved,savedM),'saved');
+  line('Debt paid this month',xF(()=>R.debtPaid,debtM),'debt');
+  s1.cf.push({ref:`B${rl}:B${rb}`,op:'lessThan',val:'0'});
+  if(!stacked){xRow(s1);xRow(s1,[xT('Exported from My Planner on '+fmtLong(today())+'. Edit amounts in the other tabs and these totals update.',8)])}
+
+  /* 2. Budget vs actual */
+  const s2=tab('Budget vs actual',W.bud);
+  xHead(s2,stacked?'Budget vs actual':'Budget vs actual — '+monLabel(ym));
+  xCols(s2,['Category','Planned','Spent','Left','% used']);
+  const b1=xNext(s2);
+  cats.forEach(c=>{const r=xNext(s2),pl=num(b.plan?.[c]),sp=byCat[c]||0;
+    xRow(s2,[xT(c),xN(pl),xF(()=>`SUMIFS(${R.txAmt},${R.txType},"Spending",${R.txCat},A${r})`,sp),xF(`B${r}-C${r}`,pl-sp),xF(`IF(B${r}=0,"",C${r}/B${r})`,pl?sp/pl:'',7)])});
+  const b2=Math.max(b1,xNext(s2)-1), bt=xNext(s2);
+  xRow(s2,[xT('Total',4),xF(`SUM(B${b1}:B${b2})`,planned,5),xF(`SUM(C${b1}:C${b2})`,spent,5),xF(`B${bt}-C${bt}`,planned-spent,5),xF(`IF(B${bt}=0,"",C${bt}/B${bt})`,planned?spent/planned:'',10)]);
+  R.plan=xRef(s2,'B',bt);
+  s2.cf.push({ref:`D${b1}:D${bt}`,op:'lessThan',val:'0'});
+
+  /* 3. Transactions */
+  const s3=tab('Transactions',W.tx);
+  xHead(s3,stacked?'Transactions':'Transactions — '+monLabel(ym));
+  xCols(s3,['Date','Type','Category','Note','Amount']);
+  const t1=xNext(s3);
+  list.forEach(t=>xRow(s3,[xD(t.date),xT(t.type==='in'?'Income':'Spending'),xT(t.cat||''),xT(t.note||''),xN(t.amount)]));
+  if(!list.length)xRow(s3,[xT('No entries this month',8)]);
+  const t2=xNext(s3)-1;
+  R.txAmt=xRng(s3,'E',t1,t2);R.txType=xRng(s3,'B',t1,t2);R.txCat=xRng(s3,'C',t1,t2);
+  let r=xRow(s3,[xT('Total spending',4),xT('',4),xT('',4),xT('',4),xF(`SUMIFS(E${t1}:E${t2},B${t1}:B${t2},"Spending")`,spent,5)]);R.spent=xRef(s3,'E',r);
+  r=xRow(s3,[xT('Total income',4),xT('',4),xT('',4),xT('',4),xF(`SUMIFS(E${t1}:E${t2},B${t1}:B${t2},"Income")`,inc,5)]);R.inc=xRef(s3,'E',r);
+
+  /* 4. Bills & subscriptions */
+  const s4=tab('Bills & subs',W.bill);
+  xHead(s4,stacked?'Bills':'Bills — '+monLabel(ym));
+  xCols(s4,['Bill','Due date','Amount','Paid?','Note']);
+  const l1=xNext(s4);
+  bills.forEach(x=>xRow(s4,[xT(x.name),xD(billDueDate(x,ym)),xN(x.amount),xT(x.paid?.[ym]?'Yes':'No'),xT(x.note||'')]));
+  if(!bills.length)xRow(s4,[xT('No bills added',8)]);
+  const l2=xNext(s4)-1;
+  if(bills.length)s4.cf.push({ref:`D${l1}:D${l2}`,op:'equal',val:'"No"'});
+  const lt=xRow(s4,[xT('Total bills',4),xT('',4),xF(`SUM(C${l1}:C${l2})`,billTot,5)]);
+  const lp=xRow(s4,[xT('Paid',4),xT('',4),xF(`SUMIFS(C${l1}:C${l2},D${l1}:D${l2},"Yes")`,billPaid,5)]);
+  const lr=xRow(s4,[xT('Still to pay',4),xT('',4),xF(`C${lt}-C${lp}`,billTot-billPaid,5)]);
+  R.billsPaid=xRef(s4,'C',lp);R.billsLeft=xRef(s4,'C',lr);
+  xHead(s4,'Subscriptions');
+  xCols(s4,['Service','Billing','Amount','Per month','Renews']);
+  const u1=xNext(s4);
+  const subs=S.subs.slice().sort((a,c)=>(a.renew||'9').localeCompare(c.renew||'9'));
+  subs.forEach(s=>{const r=xNext(s4),yr=s.cycle==='yearly';xRow(s4,[xT(s.name),xT(yr?'Yearly':'Monthly'),xN(s.amount),xF(`IF(B${r}="Yearly",C${r}/12,C${r})`,yr?num(s.amount)/12:num(s.amount)),xD(s.renew)])});
+  if(!subs.length)xRow(s4,[xT('No subscriptions added',8)]);
+  const u2=xNext(s4)-1, subM=subs.reduce((a,s)=>a+(s.cycle==='yearly'?num(s.amount)/12:num(s.amount)),0);
+  const ut=xRow(s4,[xT('Total per month',4),xT('',4),xT('',4),xF(`SUM(D${u1}:D${u2})`,subM,5)]);
+  xRow(s4,[xT('Total per year',4),xT('',4),xT('',4),xF(`D${ut}*12`,subM*12,5)]);
+
+  /* 5. Savings & debts */
+  const s5=tab('Savings & debts',W.save);
+  xHead(s5,stacked?'Savings':'Savings — '+monLabel(ym));
+  xCols(s5,['Goal','Target','Saved this month','Saved so far','Remaining','% reached','Target date']);
+  const v1=xNext(s5);
+  S.savings.forEach(s=>{const r=xNext(s5),tg=num(s.target),so=sumLog(s.log,null,end);
+    xRow(s5,[xT(s.name),xN(tg),xN(sumLog(s.log,start,end)),xN(so),xF(`B${r}-D${r}`,tg-so),xF(`IF(B${r}=0,"",D${r}/B${r})`,tg?so/tg:'',7),xD(s.deadline)])});
+  if(!S.savings.length)xRow(s5,[xT('No savings goals added',8)]);
+  const v2=xNext(s5)-1, vt=xNext(s5);
+  const svT=S.savings.reduce((a,s)=>a+num(s.target),0), svSo=S.savings.reduce((a,s)=>a+sumLog(s.log,null,end),0);
+  xRow(s5,[xT('Total',4),xF(`SUM(B${v1}:B${v2})`,svT,5),xF(`SUM(C${v1}:C${v2})`,savedM,5),xF(`SUM(D${v1}:D${v2})`,svSo,5),xF(`SUM(E${v1}:E${v2})`,svT-svSo,5),xF(`IF(B${vt}=0,"",D${vt}/B${vt})`,svT?svSo/svT:'',10)]);
+  R.saved=xRef(s5,'C',vt);
+  xHead(s5,'Debts');
+  xCols(s5,['Debt','Starting balance','Paid this month','Paid so far','Remaining','Monthly payment','Interest %']);
+  const d1=xNext(s5);
+  S.debts.forEach(d=>{const r=xNext(s5),bal=num(d.balance),so=sumLog(d.log,null,end);
+    xRow(s5,[xT(d.name),xN(bal),xN(sumLog(d.log,start,end)),xN(so),xF(`B${r}-D${r}`,bal-so),d.min?xN(d.min):xT(''),d.rate!==''&&d.rate!=null?xN(d.rate,0):xT('')])});
+  if(!S.debts.length)xRow(s5,[xT('No debts added',8)]);
+  const d2=xNext(s5)-1, dbT=S.debts.reduce((a,d)=>a+num(d.balance),0), dbSo=S.debts.reduce((a,d)=>a+sumLog(d.log,null,end),0);
+  const dt=xRow(s5,[xT('Total',4),xF(`SUM(B${d1}:B${d2})`,dbT,5),xF(`SUM(C${d1}:C${d2})`,debtM,5),xF(`SUM(D${d1}:D${d2})`,dbSo,5),xF(`SUM(E${d1}:E${d2})`,dbT-dbSo,5)]);
+  R.debtPaid=xRef(s5,'C',dt);
+  xRow(s5);xRow(s5,[xT('“So far” amounts count everything up to the end of '+monLabel(ym)+'.',8)]);
+  return {R,V};
+}
+
+function xlYear(y){
+  const cur=ymOf(today()), last=y===cur.slice(0,4)?+cur.slice(5):12;
+  const head=[], months=[], out=[];
+  const sum=xSheet(head,'Year summary',[14,17,16,16,16,16,18,16,16]);
+  for(let m=1;m<=last;m++)out.push([y+'-'+pad(m),xlMonth(months,y+'-'+pad(m),true)]);
+  xRow(sum,[xT('Budget summary — '+y,6)]);
+  xCols(sum,['Month','Expected income','Actual income','Budget','Spent','Budget left','Balance','Saved','Debt paid']);
+  const keys=['exp','inc','plan','spent','left','bal','saved','debt'];
+  const r1=xNext(sum);
+  out.forEach(([ym,{R,V}])=>xRow(sum,[xT(MON[+ym.slice(5)-1]),...keys.map(k=>xF(()=>R['s_'+k],V[k]))]));
+  const r2=xNext(sum)-1;
+  xRow(sum,[xT('Total',4),...keys.map((k,i)=>{const c=XL.col(i+1);return xF(`SUM(${c}${r1}:${c}${r2})`,out.reduce((a,[,o])=>a+o.V[k],0),5)})]);
+  sum.cf.push({ref:`F${r1}:G${r2+1}`,op:'lessThan',val:'0'});
+  xRow(sum);xRow(sum,[xT('Each month has its own tab with the budget, transactions, bills, savings and debts. Exported '+fmtLong(today())+'.',8)]);
+  return head.concat(months);
+}
+
+function xlStyles(){
+  const c=String(S.settings.currency||'RM').replace(/"/g,'');
+  const fmt=XL.esc(`"${c}" #,##0.00;-"${c}" #,##0.00`);
+  const xf=(n,f,fi,ex='')=>`<xf numFmtId="${n}" fontId="${f}" fillId="${fi}" borderId="${ex?1:0}" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"${ex?' applyBorder="1"':''}/>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="${fmt}"/><numFmt numFmtId="165" formatCode="d mmm yyyy"/></numFmts><fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="14"/><color rgb="FF8A5A44"/><name val="Calibri"/></font><font><i/><sz val="10"/><color rgb="FF8C8C8C"/><name val="Calibri"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF8E1D6"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF3EFE9"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FFD9C8BE"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="11">${[xf(0,0,0),xf(0,1,2,1),xf(164,0,0),xf(165,0,0),xf(0,1,3),xf(164,1,3),xf(0,2,0),xf(9,0,0),xf(0,3,0),xf(0,1,0),xf(9,1,3)].join('')}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><dxfs count="1"><dxf><font><b/><color rgb="FFC0392B"/></font></dxf></dxfs></styleSheet>`;
+}
+
+function xlBuild(wb){
+  const strs=[],si=new Map(),sid=v=>{if(!si.has(v)){si.set(v,strs.length);strs.push(v)}return si.get(v)};
+  const NS='xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+  const H='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  const sheetXML=sh=>{
+    const rows=sh.rows.map((cells,ri)=>{const r=ri+1;return `<row r="${r}">${cells.map((c,ci)=>{if(!c)return'';const a=XL.col(ci)+r;
+      if(c.t==='s')return c.v===''?(c.s?`<c r="${a}" s="${c.s}"/>`:''):`<c r="${a}" s="${c.s}" t="s"><v>${sid(c.v)}</v></c>`;
+      if(c.t==='n')return `<c r="${a}" s="${c.s}"><v>${c.v}</v></c>`;
+      const f=XL.esc(typeof c.f==='function'?c.f():c.f);
+      return typeof c.cache==='string'?`<c r="${a}" s="${c.s}" t="str"><f>${f}</f><v>${XL.esc(c.cache)}</v></c>`:`<c r="${a}" s="${c.s}"><f>${f}</f><v>${num(c.cache)}</v></c>`}).join('')}</row>`}).join('');
+    const cols=sh.widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('');
+    const cf=sh.cf.map((x,i)=>`<conditionalFormatting sqref="${x.ref}"><cfRule type="cellIs" dxfId="0" priority="${i+1}" operator="${x.op}"><formula>${XL.esc(x.val)}</formula></cfRule></conditionalFormatting>`).join('');
+    return `${H}<worksheet ${NS}><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${cols}</cols><sheetData>${rows}</sheetData>${cf}<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>`;
+  };
+  const sheets=wb.map(sheetXML), n=wb.length;
+  const files=[
+    {name:'[Content_Types].xml',data:`${H}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${wb.map((s,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`},
+    {name:'_rels/.rels',data:`${H}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
+    {name:'xl/workbook.xml',data:`${H}<workbook ${NS}><bookViews><workbookView/></bookViews><sheets>${wb.map((s,i)=>`<sheet name="${XL.esc(s.name)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')}</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`},
+    {name:'xl/_rels/workbook.xml.rels',data:`${H}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${wb.map((s,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')}<Relationship Id="rId${n+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId${n+2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>`},
+    {name:'xl/styles.xml',data:xlStyles()},
+    ...sheets.map((x,i)=>({name:`xl/worksheets/sheet${i+1}.xml`,data:x})),
+    {name:'xl/sharedStrings.xml',data:`${H}<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${strs.length}" uniqueCount="${strs.length}">${strs.map(s=>`<si><t xml:space="preserve">${XL.esc(s)}</t></si>`).join('')}</sst>`}
+  ];
+  return zipStore(files);
+}
+
+function zipStore(files){
+  const enc=new TextEncoder(),parts=[],central=[];let off=0;
+  const T=XL.crc||(XL.crc=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})());
+  const crc=d=>{let c=0xFFFFFFFF;for(let i=0;i<d.length;i++)c=T[(c^d[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0};
+  const now=new Date(),tm=(now.getHours()<<11)|(now.getMinutes()<<5)|(now.getSeconds()>>1),dt=((now.getFullYear()-1980)<<9)|((now.getMonth()+1)<<5)|now.getDate();
+  for(const f of files){
+    const nm=enc.encode(f.name),data=enc.encode(f.data),c=crc(data);
+    const h=new DataView(new ArrayBuffer(30));
+    [[0,0x04034b50,4],[4,20,2],[6,0x0800,2],[8,0,2],[10,tm,2],[12,dt,2],[14,c,4],[18,data.length,4],[22,data.length,4],[26,nm.length,2],[28,0,2]].forEach(([o,v,s])=>s===4?h.setUint32(o,v,true):h.setUint16(o,v,true));
+    parts.push(new Uint8Array(h.buffer),nm,data);
+    const cd=new DataView(new ArrayBuffer(46));
+    [[0,0x02014b50,4],[4,20,2],[6,20,2],[8,0x0800,2],[10,0,2],[12,tm,2],[14,dt,2],[16,c,4],[20,data.length,4],[24,data.length,4],[28,nm.length,2],[42,off,4]].forEach(([o,v,s])=>s===4?cd.setUint32(o,v,true):cd.setUint16(o,v,true));
+    central.push(new Uint8Array(cd.buffer),nm);
+    off+=30+nm.length+data.length;
+  }
+  const size=central.reduce((a,p)=>a+p.length,0),e=new DataView(new ArrayBuffer(22));
+  e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,size,true);e.setUint32(16,off,true);
+  return new Blob([...parts,...central,new Uint8Array(e.buffer)],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+
+function deliverXlsx(blob,name,onDone){
+  const dl=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);onDone();toast('Excel file saved — open it in Google Sheets')};
+  let file=null;try{file=new File([blob],name,{type:blob.type})}catch(e){}
+  if(file&&navigator.canShare&&navigator.canShare({files:[file]})){
+    navigator.share({files:[file],title:name}).then(()=>{onDone();toast('Excel file ready ✨')}).catch(e=>{if(e&&e.name==='AbortError')return;dl()});
+  }else dl();
+}
+function markExported(yms){S.settings.exported=S.settings.exported||{};yms.forEach(m=>S.settings.exported[m]=1);save('settings');render()}
+function exportMonth(ym){const wb=[];xlMonth(wb,ym,false);deliverXlsx(xlBuild(wb),`budget-${ym}.xlsx`,()=>markExported([ym]))}
+function exportYear(y){const wb=xlYear(y),cur=ymOf(today()),last=y===cur.slice(0,4)?+cur.slice(5):12,yms=[];for(let m=1;m<=last;m++)yms.push(y+'-'+pad(m));deliverXlsx(xlBuild(wb),`budget-${y}.xlsx`,()=>markExported(yms))}
+/* month to nudge about: last month, if it has money data and hasn't been exported or skipped */
+function exportDue(){
+  const prev=addM(ymOf(today()),-1);
+  if(!(txIn(prev).length||S.budgets[prev]))return null;
+  if((S.settings.exported||{})[prev]||S.settings.exportSkip===prev)return null;
+  return prev;
+}
+function exportBanner(){
+  const m=exportDue();if(!m)return '';const n=MON[+m.slice(5)-1];
+  return `<div class="paper" style="border:1.5px dashed var(--peachD)"><div class="row" style="gap:10px;align-items:flex-start"><span style="font-size:22px;line-height:1">📊</span><div class="grow"><b>${n} is done!</b><div class="small muted" style="margin:2px 0 10px">Export ${n}’s budget to Excel so you have a copy.</div><div class="row" style="gap:8px"><button class="btn sm" data-a="xlsPrev">Export ${n}</button><button class="btn sm soft" data-a="xlsSkip">Not now</button></div></div></div></div>`;
+}
+function exportCard(ym){
+  const y=ym.slice(0,4),done=(S.settings.exported||{})[ym];
+  return `<div class="paper">${band('mint','Export to Excel')}
+    <p class="small muted" style="margin-top:0">Get a spreadsheet of your budget, spending, bills, savings and debts. Opens in Google Sheets or Excel.${done?' <b>✓ Exported</b>':''}</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn sm" data-a="xlsMonth">This month (${MON[+ym.slice(5)-1]})</button><button class="btn sm soft" data-a="xlsYear">Whole year ${y}</button></div>
+  </div>`;
+}
+Object.assign(A,{
+  xlsMonth:()=>exportMonth(U.mm),
+  xlsYear:()=>exportYear(U.mm.slice(0,4)),
+  xlsPrev:()=>{const m=exportDue();if(m)exportMonth(m)},
+  xlsSkip:()=>{S.settings.exportSkip=addM(ymOf(today()),-1);save('settings');render()},
+});
 
 /* ---------- actions ---------- */
 Object.assign(A,{
