@@ -197,6 +197,8 @@ nav.bn button.on.t-plan{background:var(--lav)} nav.bn button.on.t-money{backgrou
 .toggle{width:50px;height:30px;border-radius:20px;background:var(--line);position:relative;flex:none;transition:.2s}
 .toggle i{position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:.2s}
 .toggle.on{background:var(--mintD)} .toggle.on i{left:23px}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:4px}@keyframes spin{to{transform:rotate(360deg)}}
+.sheet .field.filled{box-shadow:0 0 0 3px var(--mint);transition:box-shadow .3s}
 </style>
 </head>
 <body>
@@ -590,6 +592,7 @@ function vMoney(){
     <div class="sub" style="font-size:11px">Balance this month</div><div class="big ${inc-out<0?'money-out':''}">${money(inc-out)}</div>
     <div class="kpis" style="margin-top:10px"><div class="kpi"><small>Income</small><b class="money-in">${money(inc)}</b></div><div class="kpi"><small>Spent</small><b class="money-out">${money(out)}</b></div><div class="kpi"><small>Budget left</small><b>${planned?money(planned-out):'—'}</b></div></div>
     ${planned?`<div class="bar ${out>planned?'over':''}"><i style="width:${pct(out,planned)}%"></i></div><div class="small muted" style="margin-top:4px">${Math.round(out/planned*100)}% of budget used</div>`:''}
+    <button class="btn sm soft" style="margin-top:12px" data-a="scanReceipt">${sic('camera')} Scan receipt</button>
   </div>
   <div class="tiles">${tiles.map(([v,i,c,l,s])=>`<button class="tile" data-a="go" data-v="${v}"><span class="ic ${c}">${ic(i)}</span><b>${l}</b><span>${s}</span></button>`).join('')}</div>
   ${cats.length?`<div class="paper">${band('peach','Spending by category')}${cats.map(([c,v])=>{const pl=num(b.plan?.[c]);return `<div class="budrow"><div class="row between"><span>${esc(c)}</span><b>${money(v)}</b></div><div class="bar ${pl&&v>pl?'over':''}"><i style="width:${pl?pct(v,pl):pct(v,out)}%;${pl?'':'background:var(--peachD)'}"></i></div>${pl?`<div class="small muted" style="margin-top:3px">of ${money(pl)} budget</div>`:''}</div>`}).join('')}</div>`:''}
@@ -602,9 +605,10 @@ function vExpenses(){
   let html='',last='';
   list.forEach(t=>{if(t.date!==last){html+=`<div class="daylabel">${DOW[(P(t.date).getDay()+6)%7]} · ${fmtD(t.date)}</div>`;last=t.date}
     const c=t.type==='in'?'mint':catCol(t.cat||'Others');
-    html+=`<button class="txrow" data-a="editTx" data-id="${t.id}"><span class="cdot ${c}">${esc((t.cat||'?')[0])}</span><span class="grow"><b>${esc(t.note||t.cat||'')}</b><br><span class="small muted">${esc(t.cat||'')}</span></span><b class="${t.type==='in'?'money-in':''}">${t.type==='in'?'+':'-'}${money(num(t.amount)).replace('-','')}</b></button>`});
+    html+=`<button class="txrow" data-a="editTx" data-id="${t.id}"><span class="cdot ${c}">${esc((t.cat||'?')[0])}</span><span class="grow"><b>${esc(t.note||t.cat||'')}</b><br><span class="small muted">${t.rc?sic('clip',12)+' ':''}${esc(t.cat||'')}</span></span><b class="${t.type==='in'?'money-in':''}">${t.type==='in'?'+':'-'}${money(num(t.amount)).replace('-','')}</b></button>`});
   return `${backBtn('money','Money')}${monthNav()}
   <div class="paper">${band('pink','Expense tracker',`<small>${money(sumOut(txIn(ym)))} spent</small>`)}
+    <button class="btn sm soft" style="margin:0 0 10px" data-a="scanReceipt">${sic('camera')} Scan receipt</button>
     <div class="chips">${[['all','All'],['out','Spending'],['in','Income']].map(([k,l])=>`<button class="${U.txf===k?'on':''}" data-a="txF" data-f="${k}">${l}</button>`).join('')}</div>
     ${html||empty('No entries this month. Tap + to add one.')}</div>`;
 }
@@ -705,6 +709,7 @@ let SHEET=null;
 function sheet(title,fields,onSave,onDelete,extra=''){
   SHEET={fields,onSave,onDelete};
   const f=fields.map(x=>{
+    if(x.type==='html')return x.html;
     const v=x.value??'';
     let inp;
     if(x.type==='textarea')inp=`<textarea class="field" name="${x.name}" placeholder="${esc(x.ph||'')}">${esc(v)}</textarea>`;
@@ -748,16 +753,22 @@ function taskForm(t,preset={}){
 function txForm(t,preset={}){
   const isNew=!t;t=t||{type:'out',amount:'',cat:S.cats.out[0],date:preset.date||(U.mm===ymOf(today())?today():U.mm+'-01'),note:''};
   const catsHTML=type=>(type==='in'?S.cats.in:S.cats.out);
+  const rc=RC={id:t.id||null,has:!!t.rc,data:null,removed:false};
   sheet(isNew?'Add entry':'Edit entry',[
+    {type:'html',html:rcBlockHTML(rc),noFocus:true},
     {name:'type',label:'Type',type:'chips',options:[['out','Spending'],['in','Income']],value:t.type,noFocus:true},
     {name:'amount',label:`Amount (${S.settings.currency})`,type:'number',value:t.amount,ph:'0.00'},
     {name:'cat',label:'Category',type:'select',options:catsHTML(t.type),value:t.cat},
     {name:'date',label:'Date',type:'date',value:t.date},
     {name:'note',label:'Note',value:t.note,ph:'e.g. Lunch at Choon Hui'}
   ],v=>{if(!num(v.amount))return toast('Enter an amount');v.amount=num(v.amount);
-    if(isNew)S.tx.push({id:uid(),created:Date.now(),...v});else Object.assign(t,v);save('tx')},
-  isNew?null:()=>{S.tx=S.tx.filter(x=>x!==t);save('tx')});
-  setTimeout(()=>{const a=document.querySelector('.sheet [name=amount]');a&&a.focus()},60);
+    let x=t;if(isNew){x={id:uid(),created:Date.now(),...v};S.tx.push(x)}else Object.assign(t,v);
+    if(rc.data){x.rc=1;RCPH[x.id]=rc.data;idb.set(rcKey(x.id),rc.data).catch(()=>toast('Couldn’t save the receipt photo — phone storage may be full'))}
+    else if(rc.removed){delete x.rc;delete RCPH[x.id];idb.del(rcKey(x.id)).catch(()=>{})}
+    RC=null;save('tx')},
+  isNew?null:()=>{S.tx=S.tx.filter(x=>x!==t);if(t.rc){delete RCPH[t.id];idb.del(rcKey(t.id)).catch(()=>{})}RC=null;save('tx')});
+  if(rc.has)rcRedraw();
+  if(!RC_NEW)setTimeout(()=>{const a=document.querySelector('.sheet [name=amount]');a&&!a.value&&a.focus()},60);
 }
 function apptForm(a){
   const isNew=!a;a=a||{title:'',date:U.day||today(),time:'',where:'',notes:''};
@@ -899,7 +910,7 @@ const A={
   sheetSave:()=>{if(!SHEET)return;const r=SHEET.onSave(sheetVals());if(r===false)return;closeSheet();render()},
   sheetDel:()=>{if(!SHEET)return;const fn=SHEET.onDelete;confirmBox('This will be deleted.',()=>fn())},
   confirmYes:()=>{const fn=confirmFn;closeSheet();fn&&fn();render()},
-  downloadBackup:async()=>{const photos={};for(const v of S.vision){if(v.kind==='photo'){try{const d=PH[v.id]||await idb.get(v.id);if(d)photos[v.id]=d}catch(e){}}}const blob=new Blob([JSON.stringify({app:'planner',v:2,S,photos})],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='planner-backup-'+today()+'.json';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);try{localStorage.setItem(LS+'-backup',today())}catch(e){}toast('Backup downloaded');render()},
+  downloadBackup:async()=>{const photos={};for(const v of S.vision){if(v.kind==='photo'){try{const d=PH[v.id]||await idb.get(v.id);if(d)photos[v.id]=d}catch(e){}}}for(const t of S.tx){if(t.rc){const d=await rcGet(t.id);if(d)photos[rcKey(t.id)]=d}}const blob=new Blob([JSON.stringify({app:'planner',v:2,S,photos})],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='planner-backup-'+today()+'.json';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);try{localStorage.setItem(LS+'-backup',today())}catch(e){}toast('Backup downloaded');render()},
   pickRestore:()=>document.getElementById('restoreFile').click(),
   exportData:async()=>{try{await navigator.clipboard.writeText(JSON.stringify({app:'planner',v:1,S}));toast('Backup copied — paste it into a note or email to yourself')}catch(e){sheet('Your backup',[{name:'b',label:'Select all and copy',type:'textarea',value:JSON.stringify({app:'planner',v:1,S})}],()=>{closeSheet()})}},
   importData:()=>sheet('Restore backup',[{name:'b',label:'Paste your backup text',type:'textarea'}],v=>{restoreFrom(v.b);return false}),
@@ -1399,6 +1410,167 @@ function vLife(){
   ${waterCard(t)}`;
 }
 
+/* ---------- receipt scanning (reads on the phone, offline after first use) ---------- */
+I.camera='<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>';
+I.clip='<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>';
+const OCR={w:null,loading:null,log:null};
+let RC=null, RC_NEW=false;
+const rcKey=id=>'rc-'+id;
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s)})}
+function ocrWorker(){
+  if(OCR.w)return Promise.resolve(OCR.w);
+  if(!OCR.loading)OCR.loading=(async()=>{
+    if(!window.Tesseract)await loadScript('ocr/tesseract.min.js');
+    const base=new URL('ocr/',location.href).href;
+    const w=await Tesseract.createWorker('eng',1,{workerPath:base+'worker.min.js',corePath:base,langPath:base,gzip:true,logger:m=>OCR.log&&OCR.log(m)});
+    await w.setParameters({tessedit_pageseg_mode:'6',preserve_interword_spaces:'1'});
+    OCR.w=w;return w;
+  })().catch(e=>{OCR.loading=null;throw e});
+  return OCR.loading;
+}
+function loadImg(file){return new Promise((res,rej)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{URL.revokeObjectURL(url);res(img)};img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('img'))};img.src=url})}
+function imgCanvas(img,max,minW=0){
+  let k=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+  if(minW&&img.naturalWidth*k<minW)k=Math.min(2.5,minW/img.naturalWidth);
+  const c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*k);c.height=Math.round(img.naturalHeight*k);
+  c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c;
+}
+/* grayscale + contrast stretch helps with faded thermal paper */
+function ocrPrep(img){
+  const c=imgCanvas(img,2200,1100),x=c.getContext('2d'),d=x.getImageData(0,0,c.width,c.height),p=d.data,h=new Uint32Array(256);
+  for(let i=0;i<p.length;i+=4){const g=(p[i]*299+p[i+1]*587+p[i+2]*114)/1000|0;p[i]=g;h[g]++}
+  const n=p.length/4;let lo=0,hi=255,acc=0;while(lo<255&&(acc+=h[lo])<n*.02)lo++;acc=0;while(hi>0&&(acc+=h[hi])<n*.02)hi--;
+  const r=Math.max(1,hi-lo);
+  for(let i=0;i<p.length;i+=4){const v=Math.max(0,Math.min(255,(p[i]-lo)*255/r));p[i]=p[i+1]=p[i+2]=v}
+  x.putImageData(d,0,0);return c;
+}
+
+/* ---- pull amount / date / shop out of the text ---- */
+function rcAmounts(line){const re=/(\d{1,3}(?:,\d{3})+|\d+)\s?[.,]\s?(\d{2})(?![\d%])/g,o=[];let m;while((m=re.exec(line)))o.push(parseFloat(m[1].replace(/,/g,'')+'.'+m[2]));return o}
+function rcTotal(lines){
+  const strong=/grand\s*total|rounded\s*total|total\s*(after\s*)?round|nett?\s*total|total\s*nett?|amount\s*(due|payable)|total\s*(payable|due|amount)|jumlah\s*(besar|bersih|perlu\s*dibayar)/i;
+  const mid=/total\s*(incl|inc\b|\(rm\)|rm\b|sales|bill|price)|jumlah|\btotal\s*:/i;
+  const weak=/\btota[l1i]\b|\bt[o0]tal/i;
+  const not=/sub\s*-?\s*tota[l1]|total\s*(qty|quantity|items?|item\s*count|disc|discount|savings?|saved|excl|before|tax|sst|gst|service)|tax\s*total|items?\s*total/i;
+  let best=null;
+  lines.forEach((l,i)=>{
+    if(not.test(l))return;
+    const rank=strong.test(l)?3:mid.test(l)?2:weak.test(l)?1:0;if(!rank)return;
+    let a=rcAmounts(l);if(!a.length&&lines[i+1])a=rcAmounts(lines[i+1]);
+    if(!a.length)return;const v=a[a.length-1];
+    if(v>0&&v<100000&&(!best||rank>=best.rank))best={rank,v};
+  });
+  if(best)return best.v;
+  const skip=/cash|tunai|change|baki|tender|paid|bayar|card|visa|master|debit|credit|qr|ewallet|tng|rounding|pembundaran|tel|phone|no[.:]|gst\s*id|sst\s*id|reg/i;
+  let max=0;lines.forEach(l=>{if(skip.test(l))return;rcAmounts(l).forEach(v=>{if(v<100000&&v>max)max=v})});
+  return max||null;
+}
+function rcDate(text){
+  const MO={jan:1,feb:2,mar:3,apr:4,may:5,mei:5,jun:6,jul:7,aug:8,ogo:8,sep:9,oct:10,okt:10,nov:11,dec:12,dis:12};
+  const t=today(),lo=addD(t,-730),hi=addD(t,1),out=[];
+  const ok=(y,m,d)=>{y=+y;m=+m;d=+d;if(y<100)y+=2000;if(m<1||m>12||d<1||d>daysIn(y+'-'+pad(m)))return null;const s=`${y}-${pad(m)}-${pad(d)}`;return s>=lo&&s<=hi?s:null};
+  let m;const R=[
+    [/\b(20\d{2})[-\/.](\d{1,2})[-\/.](\d{1,2})\b/g,x=>ok(x[1],x[2],x[3])],
+    [/\b(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4}|\d{2})\b/g,x=>ok(x[3],x[2],x[1])||ok(x[3],x[1],x[2])],
+    [/\b(\d{1,2})[\s\-\/.]*([A-Za-z]{3,9})[\s\-\/.,]*(\d{4}|\d{2})\b/g,x=>MO[x[2].slice(0,3).toLowerCase()]?ok(x[3],MO[x[2].slice(0,3).toLowerCase()],x[1]):null],
+    [/\b([A-Za-z]{3,9})[\s.]+(\d{1,2}),?\s+(\d{4})\b/g,x=>MO[x[1].slice(0,3).toLowerCase()]?ok(x[3],MO[x[1].slice(0,3).toLowerCase()],x[2]):null]
+  ];
+  R.forEach(([re,f])=>{while((m=re.exec(text))){const v=f(m);if(v)out.push([m.index,v])}});
+  out.sort((a,b)=>a[0]-b[0]);return out.length?out[0][1]:null;
+}
+function rcShop(lines){
+  const junk=/receipt|resit|invoice|inv\b|tax|welcome|selamat|thank|tel\b|tel[:.]|phone|fax|www|http|@|gst|sst|reg\b|reg[.:]|no[.:]|cashier|kasir|date|time|table|order|bill\b|counter|pos\b|jalan|jln|lot\b|taman|tmn|\b\d{5}\b/i;
+  for(const raw of lines.slice(0,6)){
+    let l=raw.replace(/\(.*?\)/g,' ').replace(/\b(sdn\.?\s*bhd\.?|bhd\.?|plt|co\.|co\b|enterprise|trading|kuching|sarawak|malaysia|miri|sibu|bintulu|samarahan|kuala\s*lumpur)(?=\W|$)/gi,' ').replace(/[^A-Za-z0-9&'.\- ]+/g,' ').replace(/\s+/g,' ').trim();
+    const letters=(l.match(/[A-Za-z]/g)||[]).length;
+    if(letters<3||letters/l.length<.6||junk.test(raw))continue;
+    if(l===l.toUpperCase())l=l.toLowerCase().replace(/\b[a-z]/g,c=>c.toUpperCase());
+    return l.slice(0,40);
+  }
+  return '';
+}
+function rcCategory(text){
+  const map=[
+    ['Transport',/grab|petronas|shell|petron|caltex|bhp|parking|touch\s*'?n\s*go|tng|toll|lrt|mrt|bas\b|airasia|mas\s*airlines/i],
+    ['Groceries',/aeon|lotus|tesco|mydin|giant|jaya\s*grocer|speedmart|econsave|tf\s*value|everrise|choice\s*mart|village\s*grocer|hero\s*market|cold\s*storage|supermarket|pasaraya|mart\b/i],
+    ['Food & Dining',/tealive|zus|starbucks|mcdonald|mcd\b|kfc|marrybrown|domino|pizza|subway|texas|sushi|restoran|restaurant|cafe|caf[eé]|kopitiam|bakery|coffee|kopi|food|nasi|mee|laksa|dine|kitchen|chatime|secret\s*recipe|family\s*mart|7-?eleven/i],
+    ['Health',/guardian|watsons|pharmacy|farmasi|klinik|clinic|hospital|dental|caring|big\s*pharmacy|alpro/i],
+    ['Bills & Utilities',/tnb|tenaga|sesco|syabas|kwb|unifi|maxis|celcom|digi|u\s*mobile|astro|time\s*internet|indah\s*water/i],
+    ['Shopping',/shopee|lazada|uniqlo|h&m|zara|mr\s*diy|daiso|ikea|popular|mph|harvey|courts|senheng|switch|machines|kkv|miniso|padini|cotton\s*on/i],
+    ['Personal Care',/salon|barber|spa\b|nail|beauty|sephora/i],
+    ['Entertainment',/gsc|tgv|mbo|cinema|karaoke|bowling|netflix|spotify|steam/i]
+  ];
+  for(const [c,re] of map)if(S.cats.out.includes(c)&&re.test(text))return c;
+  return '';
+}
+function parseReceipt(text){
+  const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);
+  return {amount:rcTotal(lines),date:rcDate(text),shop:rcShop(lines),cat:rcCategory(text)};
+}
+
+/* ---- form pieces ---- */
+function rcBlockHTML(rc){
+  const has=rc.data||(rc.has&&!rc.removed);
+  return `<div id="rcBlock" style="margin:2px 0 6px">${has?`<div class="row" style="gap:12px;align-items:center;padding:10px;border-radius:14px;background:var(--bg)"><img id="rcThumb" alt="Receipt" data-a="rcView" style="width:54px;height:72px;object-fit:cover;border-radius:8px;background:#eee" ${rc.data?`src="${rc.data}"`:''}><div class="grow"><b>Receipt attached</b><div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><button type="button" class="btn sm soft" data-a="rcView">View</button><button type="button" class="btn sm soft" data-a="rcPick">Replace</button><button type="button" class="btn sm soft" data-a="rcRemove">Remove</button></div></div></div>`
+    :`<button type="button" class="btn soft" style="width:100%;justify-content:center;gap:8px" data-a="rcPick">${sic('camera',18)} Scan receipt</button><div class="small muted" style="margin-top:6px;text-align:center">Take a photo and I’ll fill in the amount, date and shop.</div>`}
+    <div id="rcStatus" class="small" style="margin-top:8px;min-height:1px"></div></div>`;
+}
+function rcRedraw(){
+  if(!RC)return;const el=document.getElementById('rcBlock');if(!el)return;
+  const st=document.getElementById('rcStatus')?.innerHTML||'';
+  el.outerHTML=rcBlockHTML(RC);const s=document.getElementById('rcStatus');if(s)s.innerHTML=st;
+  if(!RC.data&&RC.has&&!RC.removed){const rc=RC;rcGet(rc.id).then(d=>{const im=document.getElementById('rcThumb');if(im&&RC===rc&&d)im.src=d})}
+}
+const rcStatus=(html,cls='muted')=>{const s=document.getElementById('rcStatus');if(s){s.className='small '+cls;s.innerHTML=html}};
+const RCPH={};
+async function rcGet(id){if(RCPH[id])return RCPH[id];try{const d=await idb.get(rcKey(id));if(d)RCPH[id]=d;return d}catch(e){return null}}
+function rcViewer(src){
+  const v=document.createElement('div');
+  v.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(20,16,14,.92);display:flex;align-items:center;justify-content:center;padding:calc(env(safe-area-inset-top) + 20px) 16px calc(env(safe-area-inset-bottom) + 20px)';
+  v.innerHTML=src?`<img src="${src}" alt="Receipt" style="max-width:100%;max-height:100%;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.4)"><div style="position:absolute;top:calc(env(safe-area-inset-top) + 14px);right:18px;color:#fff;font-size:15px">Tap to close</div>`:`<div style="color:#fff;text-align:center;max-width:280px">This receipt photo isn’t on this phone. It may have been restored from a text backup, which doesn’t include photos.<br><br>Tap to close</div>`;
+  v.onclick=()=>v.remove();document.body.appendChild(v);
+}
+function setField(name,val){const el=document.querySelector(`.sheet [name=${name}]`);if(!el||val==null||val==='')return false;if(el.tagName==='SELECT'&&![...el.options].some(o=>o.value===val))return false;el.value=val;el.classList.add('filled');setTimeout(()=>el.classList.remove('filled'),1600);return true}
+async function rcHandleFile(file){
+  const rc=RC;if(!rc||!file)return;
+  let img;try{img=await loadImg(file)}catch(e){return toast('Couldn’t open that photo')}
+  rc.data=imgCanvas(img,1300).toDataURL('image/jpeg',.62);rc.removed=false;rcRedraw();
+  rcStatus('<span class="spin"></span> Reading receipt…');
+  OCR.log=m=>{if(RC!==rc)return;if(m.status&&/load|initial/i.test(m.status)&&!OCR.w)rcStatus('<span class="spin"></span> Getting the receipt reader ready (first time only)…');else if(m.status==='recognizing text')rcStatus(`<span class="spin"></span> Reading receipt… ${Math.round((m.progress||0)*100)}%`)};
+  try{
+    const w=await ocrWorker();
+    const {data}=await w.recognize(ocrPrep(img));
+    if(RC!==rc)return;
+    OCR.last=data.text||'';const r=parseReceipt(OCR.last);
+    const typeEl=document.querySelector('.sheet [name=type]');
+    if(typeEl&&typeEl.value==='in'){const chip=document.querySelector('.sheet [data-chips=type] [data-val=out]');chip&&chip.click()}
+    const got=[];
+    if(r.amount&&setField('amount',r.amount.toFixed(2)))got.push('amount');
+    if(r.date&&setField('date',r.date))got.push('date');
+    const note=document.querySelector('.sheet [name=note]');if(r.shop&&note&&(!note.value||note.dataset.auto)){note.value=r.shop;note.dataset.auto=1;got.push('shop')}
+    if(r.cat&&setField('cat',r.cat))got.push('category');
+    if(!r.amount)rcStatus('Couldn’t find the total — please type the amount. The photo is still attached.','money-out');
+    else rcStatus('✓ Filled in '+got.join(', ')+' from the receipt. Check it’s right, then Save.','money-in');
+  }catch(e){
+    if(RC!==rc)return;
+    rcStatus(navigator.onLine?'Couldn’t read this receipt. Type the details in — the photo is still attached.':'The receipt reader needs internet the first time it’s used. The photo is still attached — type the details in for now.','money-out');
+  }
+}
+Object.assign(A,{
+  scanReceipt:()=>{RC_NEW=true;const f=document.getElementById('rcFile');f.value='';f.click()},
+  rcPick:()=>{RC_NEW=false;const f=document.getElementById('rcFile');f.value='';f.click()},
+  rcRemove:()=>{if(!RC)return;RC.data=null;RC.removed=true;rcStatus('');rcRedraw()},
+  rcView:async()=>{if(!RC)return;rcViewer(RC.data||await rcGet(RC.id))},
+  txReceipt:async(e,d)=>{rcViewer(await rcGet(d.id))},
+});
+(()=>{const f=document.createElement('input');f.type='file';f.accept='image/*';f.id='rcFile';f.style.display='none';document.body.appendChild(f)})();
+document.addEventListener('change',e=>{
+  if(e.target.id!=='rcFile'||!e.target.files||!e.target.files[0])return;
+  const file=e.target.files[0];
+  if(RC_NEW||!RC){txForm(null,{date:today()});RC_NEW=false}
+  rcHandleFile(file);
+});
+
 /* ---------- Excel export (budget) ---------- */
 const XL={
   esc:s=>String(s??'').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])),
@@ -1422,7 +1594,7 @@ const sumLog=(log,from,to)=>(log||[]).filter(l=>(!from||(l.date&&l.date>=from))&
 
 /* writes one month; stacked = all sections on one tab (year file) */
 function xlMonth(wb,ym,stacked){
-  const W={sum:[28,18],bud:[24,16,16,16,12],tx:[14,12,20,30,16],bill:[24,16,16,12,28],save:[24,18,18,18,16,12,16]};
+  const W={sum:[28,18],bud:[24,16,16,16,12],tx:[14,12,20,30,16,10],bill:[24,16,16,12,28],save:[24,18,18,18,16,12,16]};
   const one=stacked?xSheet(wb,MON[+ym.slice(5)-1].slice(0,3),[26,18,18,18,18,14,16]):null;
   const tab=(name,w)=>one||xSheet(wb,name,w);
   const R={},V={};
@@ -1471,9 +1643,9 @@ function xlMonth(wb,ym,stacked){
   /* 3. Transactions */
   const s3=tab('Transactions',W.tx);
   xHead(s3,stacked?'Transactions':'Transactions — '+monLabel(ym));
-  xCols(s3,['Date','Type','Category','Note','Amount']);
+  xCols(s3,['Date','Type','Category','Note','Amount','Receipt']);
   const t1=xNext(s3);
-  list.forEach(t=>xRow(s3,[xD(t.date),xT(t.type==='in'?'Income':'Spending'),xT(t.cat||''),xT(t.note||''),xN(t.amount)]));
+  list.forEach(t=>xRow(s3,[xD(t.date),xT(t.type==='in'?'Income':'Spending'),xT(t.cat||''),xT(t.note||''),xN(t.amount),xT(t.rc?'Yes':'')]));
   if(!list.length)xRow(s3,[xT('No entries this month',8)]);
   const t2=xNext(s3)-1;
   R.txAmt=xRng(s3,'E',t1,t2);R.txType=xRng(s3,'B',t1,t2);R.txCat=xRng(s3,'C',t1,t2);
